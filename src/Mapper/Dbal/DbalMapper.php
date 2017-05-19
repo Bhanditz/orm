@@ -20,6 +20,7 @@ use Nextras\Orm\Entity\IProperty;
 use Nextras\Orm\Entity\Reflection\PropertyMetadata;
 use Nextras\Orm\Entity\Reflection\PropertyRelationshipMetadata as Relationship;
 use Nextras\Orm\InvalidArgumentException;
+use Nextras\Orm\LogicException;
 use Nextras\Orm\Mapper\BaseMapper;
 use Nextras\Orm\Mapper\IMapper;
 use Nextras\Orm\Mapper\IRelationshipMapper;
@@ -33,6 +34,9 @@ class DbalMapper extends BaseMapper
 
 	/** @var Cache */
 	protected $cache;
+
+	/** @var QueryBuilderHelper|null */
+	protected $queryBuilderHelper;
 
 	/** @var array */
 	private $cacheRM = [];
@@ -53,7 +57,7 @@ class DbalMapper extends BaseMapper
 	/** @inheritdoc */
 	public function findAll(): ICollection
 	{
-		return new DbalCollection($this->getRepository(), $this->connection, $this->builder());
+		return new DbalCollection($this, $this->connection, $this->builder());
 	}
 
 
@@ -70,7 +74,7 @@ class DbalMapper extends BaseMapper
 	public function toCollection($data): ICollection
 	{
 		if ($data instanceof QueryBuilder) {
-			return new DbalCollection($this->getRepository(), $this->connection, $data);
+			return new DbalCollection($this, $this->connection, $data);
 
 		} elseif (is_array($data)) {
 			$storageReflection = $this->getStorageReflection();
@@ -110,6 +114,17 @@ class DbalMapper extends BaseMapper
 			$this->getStorageReflection()->getManyHasManyStorageName($targetMapper->getStorageReflection()),
 			$this->getStorageReflection()->getManyHasManyStoragePrimaryKeys($targetMapper->getStorageReflection()),
 		];
+	}
+
+
+	public function getQueryBuilderHelper(): QueryBuilderHelper
+	{
+		if ($this->queryBuilderHelper === null) {
+			$model = $this->getRepository()->getModel();
+			$this->queryBuilderHelper = new QueryBuilderHelper($model, $this);
+		}
+
+		return $this->queryBuilderHelper;
 	}
 
 
@@ -198,6 +213,30 @@ class DbalMapper extends BaseMapper
 			$this->getRepository()->getEntityMetadata()->getPrimaryKey(),
 			$this->cache
 		);
+	}
+
+
+	// == Custom Functions API =========================================================================================
+
+
+	public function processQueryBuilderFunctionCall(QueryBuilder $builder, string $function, array $args): array
+	{
+		switch ($function) {
+			case ICollection::AND:
+				return ['%and', $this->getQueryBuilderHelper()->processCondArgs($builder, $args)];
+
+			case ICollection::OR:
+				return ['%or', $this->getQueryBuilderHelper()->processCondArgs($builder, $args)];
+
+			default:
+				$methodName = 'processQueryBuilderFunction' . ucfirst($function);
+				if (method_exists($this, $methodName)) {
+					return $this->$methodName($builder, ...$args);
+
+				} else {
+					throw new LogicException("Call to unknown function QueryBuilder $function function.");
+				}
+		}
 	}
 
 
