@@ -8,6 +8,8 @@
 
 namespace Nextras\Orm\Mapper;
 
+use Closure;
+use Nextras\Orm\Collection\Helpers\ArrayCollectionHelper;
 use Nextras\Orm\Collection\ICollection;
 use Nextras\Orm\Entity\IEntity;
 use Nextras\Orm\Entity\Reflection\PropertyMetadata;
@@ -44,6 +46,9 @@ interface IMapper
 	 * Creates collection with OneHasMany mapper.
 	 */
 	public function createCollectionOneHasMany(PropertyMetadata $metadata): ICollection;
+
+
+	public function processArrayFunctionCall(ArrayCollectionHelper $helper, string $function, array $args): Closure;
 
 
 	public function setRepository(IRepository $repository);

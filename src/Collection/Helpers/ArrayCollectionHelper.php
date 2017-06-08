@@ -17,68 +17,52 @@ use Nextras\Orm\Entity\Reflection\EntityMetadata;
 use Nextras\Orm\Entity\Reflection\PropertyMetadata;
 use Nextras\Orm\InvalidArgumentException;
 use Nextras\Orm\InvalidStateException;
-use Nextras\Orm\NotSupportedException;
+use Nextras\Orm\Mapper\IMapper;
 use Nextras\Orm\Relationships\IRelationshipCollection;
 use Nextras\Orm\Repository\IRepository;
 
 
 class ArrayCollectionHelper
 {
-
 	/** @var IRepository */
 	private $repository;
+
+	/** @var IMapper */
+	private $mapper;
 
 
 	public function __construct(IRepository $repository)
 	{
 		$this->repository = $repository;
+		$this->mapper = $repository->getMapper();
 	}
 
 
-	public function createFilter(array $conditions): Closure
+	public function createFilter(array $expr): Closure
 	{
-		if (!isset($conditions[0])) {
-			$operator = ICollection::AND;
-		} else {
-			$operator = array_shift($conditions);
-		}
+		if (isset($expr[0])) {
+			$operator = array_shift($expr);
+			return $this->mapper->processArrayFunctionCall($this, $operator, $expr);
 
-		$callbacks = [];
-		foreach ($conditions as $expression => $value) {
-			if (is_int($expression)) {
-				$callbacks[] = $this->createFilter($value);
-			} else {
-				$callbacks[] = $this->createExpressionFilter($expression, $value);
-			}
-		}
-
-		if ($operator === ICollection::AND) {
-			return function ($value) use ($callbacks) {
-				foreach ($callbacks as $callback) {
-					if (!$callback($value)) {
-						return false;
-					}
-				}
-				return true;
-			};
-		} elseif ($operator === ICollection::OR) {
-			return function ($value) use ($callbacks) {
-				foreach ($callbacks as $callback) {
-					if ($callback($value)) {
-						return true;
-					}
-				}
-				return false;
-			};
 		} else {
-			throw new NotSupportedException("Operator $operator is not supported");
+			return $this->mapper->processArrayFunctionCall($this, ICollection::AND, $expr);
 		}
 	}
 
 
-	/**
-	 * @param  mixed  $value
-	 */
+	public function createExpressionFilter2(string $expression, $value, Closure $comparator): Closure
+	{
+		list($chain, $sourceEntity) = ConditionParserHelper::parsePropertyExpr($expression);
+		$sourceEntityMeta = $this->repository->getEntityMetadata($sourceEntity);
+
+		if ($value instanceof IEntity) {
+			$value = $value->getValue('id');
+		}
+
+		return $this->createFilterEvaluator($chain, $comparator, $sourceEntityMeta, $value);
+	}
+
+
 	public function createExpressionFilter(string $condition, $value): Closure
 	{
 		list($chain, $operator, $sourceEntity) = ConditionParserHelper::parsePropertyExprWithOperator($condition);
@@ -90,6 +74,20 @@ class ArrayCollectionHelper
 
 		$comparator = $this->createComparator($operator, is_array($value));
 		return $this->createFilterEvaluator($chain, $comparator, $sourceEntityMeta, $value);
+	}
+
+
+	public function createCallbacks(array $conditions): array
+	{
+		$callbacks = [];
+		foreach ($conditions as $expression => $value) {
+			if (is_int($expression)) {
+				$callbacks[] = $this->createFilter($value);
+			} else {
+				$callbacks[] = $this->createExpressionFilter($expression, $value);
+			}
+		}
+		return $callbacks;
 	}
 
 
